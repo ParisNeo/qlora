@@ -31,6 +31,7 @@ from transformers import (
 from datasets import load_dataset, Dataset
 import evaluate
 
+
 from peft import (
     prepare_model_for_kbit_training,
     AutoPeftModelForCausalLM,
@@ -118,8 +119,8 @@ class DataArguments:
         metadata={"help": "Which dataset to finetune on. See datamodule for options."}
     )
     dataset_format: Optional[str] = field(
-        default='airoboros',
-        metadata={"help": "Which dataset format is used. [alpaca|chip2|self-instruct|hh-rlhf|airoboros]"}
+        default='lollms',
+        metadata={"help": "Which dataset format is used. [alpaca|chip2|self-instruct|hh-rlhf|lollms]"}
     )
     expand_conversations: bool = field(
         default=False,
@@ -391,11 +392,13 @@ def get_accelerate_model(args, checkpoint_dir):
         tokenizer.add_special_tokens({
             "eos_token": tokenizer.convert_ids_to_tokens(model.config.eos_token_id),
             "bos_token": tokenizer.convert_ids_to_tokens(model.config.bos_token_id),
-            "unk_token": tokenizer.convert_ids_to_tokens(
-                model.config.pad_token_id if model.config.pad_token_id != -1 else tokenizer.pad_token_id
-            ),
+
         })
-    
+        """
+        "unk_token": tokenizer.convert_ids_to_tokens(
+            model.config.pad_token_id if model.config.pad_token_id != -1 else tokenizer.pad_token_id
+        ),            
+        """    
     if not args.full_finetune and args.bits in (8, 4):
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=args.gradient_checkpointing)
 
@@ -576,7 +579,7 @@ def get_chat_prompt(
     texts.append(f'{message} [/INST] ')
     return ''.join(texts)
 
-def format_chat_airoboros(item):
+def format_chat_lollms(item):
     system_prompt = item['conversations'][0]['value']
     offset = 1
     if item['conversations'][0]['from'] != 'system':
@@ -625,7 +628,8 @@ def expand_conversations(items):
             })
     return expanded
 
-def airoboros_chat_dataset(dataset_name, test_size=0.02, expand=True):
+
+def lollms_chat_dataset(dataset_name, test_size=0.02, expand=True):
     with open(dataset_name) as infile:
         items = json.loads(infile.read())
     if expand:
@@ -693,16 +697,17 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
         elif dataset_name == 'vicuna':
             raise NotImplementedError("Vicuna data was not released.")
         else:
+            print(f"---------- Loading dataset : {dataset_name} -------------------")
             if os.path.exists(dataset_name):
                 try:
                     args.dataset_format = args.dataset_format if args.dataset_format else "input-output"
                     full_dataset = (
-                        airoboros_chat_dataset(
+                        lollms_chat_dataset(
                             dataset_name,
                             args.eval_dataset_size,
                             args.expand_conversations
                         )
-                        if args.dataset_format == 'airoboros_chat'
+                        if args.dataset_format == 'lollms_chat'
                         else local_dataset(dataset_name, args.eval_dataset_size)
                     )
                     return full_dataset
@@ -735,27 +740,28 @@ def make_data_module(tokenizer: transformers.PreTrainedTokenizer, args) -> Dict:
                 'input': '',
                 'output': x['text'],
             })
-        elif dataset_format == 'airoboros':
-            def _format_airoboros(instruction):
+        elif dataset_format == 'lollms':
+            def _format_lollms(instruction):
                 in_ = None
                 if instruction.get("skip_prompt_formatting"):
                     in_ = instruction["instruction"].strip() + "\n"
                 else:
                     in_ = "\n".join([
+                        "!@>instructions: ",
                         (instruction.get('system') or 'A chat.').strip(),
-                        f"USER: {instruction['instruction'].strip()}",
+                        f"!@>user: {instruction['instruction'].strip()}",
                     ])
                     if in_.endswith("PLAINFORMAT"):
                         in_ = re.sub(r"\s+PLAINFORMAT$", "", in_, re.DOTALL)
                         in_ += " PLAINFORMAT"
-                    in_ = "\n".join([in_.strip(), "ASSISTANT: "])
+                    in_ = "\n".join([in_.strip(), "!@>lollms: "])
                 return {
                     'input': in_,
                     'output': instruction['response'].strip() + "\n",
                 }
-            dataset = dataset.map(_format_airoboros)
-        elif dataset_format == 'airoboros_chat':
-            dataset = dataset.map(format_chat_airoboros)
+            dataset = dataset.map(_format_lollms)
+        elif dataset_format == 'lollms_chat':
+            dataset = dataset.map(format_chat_lollms)
         elif dataset_format == 'input-output':
             # leave as is
             pass
