@@ -569,14 +569,14 @@ def get_chat_prompt(
     chat_history: list[tuple[str, str]],
     system_prompt: str
 ) -> str:
-    texts = [f'[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n']
+    texts = [f'!@>instructions:{system_prompt}\n']
     do_strip = False
     for user_input, response in chat_history:
         user_input = user_input.strip() if do_strip else user_input
         do_strip = True
-        texts.append(f'{user_input} [/INST] {response.strip()} </s><s>[INST] ')
+        texts.append(f'!@>user: {user_input}\n!@>lollms: {response.strip()}\n')
     message = message.strip() if do_strip else message
-    texts.append(f'{message} [/INST] ')
+    texts.append(f'{message}')
     return ''.join(texts)
 
 def format_chat_lollms(item):
